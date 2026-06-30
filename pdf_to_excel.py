@@ -3,7 +3,8 @@ import tkinter.filedialog as fd
 import tkinter.messagebox as messagebox
 from PIL import Image
 import pdfplumber
-import pandas as pd
+import openpyxl
+from openpyxl.utils import get_column_letter
 import os
 import threading
 import subprocess
@@ -126,7 +127,12 @@ class PDFtoExcelApp(ctk.CTk):
     def show_success(self, excel_path):
         if messagebox.askyesno("Success", f"Conversion completed successfully!\n\nFile saved at:\n{excel_path}\n\nDo you want to open the output folder?"):
             try:
-                subprocess.run(["open", "-R", excel_path])
+                if sys.platform == "darwin":
+                    subprocess.run(["open", "-R", excel_path])
+                elif sys.platform == "win32":
+                    subprocess.run(["explorer", "/select,", os.path.normpath(excel_path)])
+                else:
+                    subprocess.run(["xdg-open", os.path.dirname(excel_path)])
             except Exception as e:
                 print("Error opening folder:", e)
 
@@ -161,7 +167,12 @@ class PDFtoExcelApp(ctk.CTk):
 
     def convert_logic(self, pdf_path, excel_path, strategy):
         try:
-            all_tables = []
+            wb = openpyxl.Workbook()
+            # Remove default sheet
+            wb.remove(wb.active)
+            
+            tables_found = False
+            
             with pdfplumber.open(pdf_path) as pdf:
                 total_pages = len(pdf.pages)
                 
@@ -184,19 +195,15 @@ class PDFtoExcelApp(ctk.CTk):
                         })
                     
                     if table:
-                        # table is a list of lists. table[0] usually contains headers.
-                        # Need to handle cases where table might be empty or invalid
-                        if len(table) > 1:
-                            df = pd.DataFrame(table[1:], columns=table[0])
-                        else:
-                            df = pd.DataFrame(table)
-                        all_tables.append(df)
+                        tables_found = True
+                        ws = wb.create_sheet(title=f'Page_{i+1}')
+                        for row_idx, row_data in enumerate(table, 1):
+                            for col_idx, cell_value in enumerate(row_data, 1):
+                                ws.cell(row=row_idx, column=col_idx, value=cell_value)
             
-            if all_tables:
+            if tables_found:
                 self.update_status("Saving to Excel...", "blue")
-                with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
-                    for i, df in enumerate(all_tables):
-                        df.to_excel(writer, sheet_name=f'Page_{i+1}', index=False)
+                wb.save(excel_path)
                 
                 self.update_status(f"Success! Saved to {os.path.basename(excel_path)}", "green")
                 self.update_progress(1.0)
